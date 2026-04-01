@@ -486,6 +486,11 @@ func (engine *Engine) validateHeader(header string) (clientIP string, valid bool
 	items := strings.Split(header, ",")
 	for i := len(items) - 1; i >= 0; i-- {
 		ipStr := strings.TrimSpace(items[i])
+		// Clean IP address to handle non-standard formats:
+		// - IPv6 with brackets: [240e:318:2f4a:de56::240]
+		// - IPv4 with port: 192.168.8.39:38792
+		// - IPv6 with brackets and port: [240e:318:2f4a:de56::240]:38792
+		ipStr = cleanIPAddress(ipStr)
 		ip := net.ParseIP(ipStr)
 		if ip == nil {
 			break
@@ -498,6 +503,32 @@ func (engine *Engine) validateHeader(header string) (clientIP string, valid bool
 		}
 	}
 	return "", false
+}
+
+// cleanIPAddress removes brackets from IPv6 addresses and strips port numbers
+// to handle non-standard X-Forwarded-For header formats from some reverse proxies.
+// For example:
+//   - [240e:318:2f4a:de56::240] -> 240e:318:2f4a:de56::240
+//   - 192.168.8.39:38792 -> 192.168.8.39
+//   - [240e:318:2f4a:de56::240]:38792 -> 240e:318:2f4a:de56::240
+func cleanIPAddress(ipStr string) string {
+	// First, try to split host and port using net.SplitHostPort
+	// This handles formats like:
+	// - 192.168.8.39:38792
+	// - [240e:318:2f4a:de56::240]:38792
+	host, _, err := net.SplitHostPort(ipStr)
+	if err == nil {
+		return host
+	}
+
+	// If SplitHostPort fails, check if it's an IPv6 address wrapped in brackets
+	// without a port: [240e:318:2f4a:de56::240]
+	if strings.HasPrefix(ipStr, "[") && strings.HasSuffix(ipStr, "]") {
+		return ipStr[1 : len(ipStr)-1]
+	}
+
+	// Otherwise, return the original string
+	return ipStr
 }
 
 // updateRouteTree do update to the route tree recursively
